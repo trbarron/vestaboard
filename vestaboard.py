@@ -30,7 +30,7 @@ def getDenverWeather():
         weatherDesc = data["list"][0]["weather"][0]["main"]
         tempMax = data["list"][0]["main"]["temp_max"]
         temp = round((tempMax - 273.15) * (9/5) + 32, 1)
-        return f"Weather:{weatherDesc}\nHigh:{temp}F"
+        return f"Weather:{weatherDesc}\nTemp:{temp}F"
     else:
         return "Error fetching weather"
 
