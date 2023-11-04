@@ -1,7 +1,6 @@
-import requests, time, json, random, html
-import statsapi
-from datetime import datetime
-from config import VESTABOARD_API_KEY, WEATHER_API_KEY, WORD_API_KEY
+import requests, time, json, re
+from datetime import datetime, timezone, timedelta
+from config import VESTABOARD_API_KEY, WEATHER_API_KEY, RAPID_API_KEY
 
 HEADERS = {
     'Content-Type': 'application/json',
@@ -13,10 +12,14 @@ WEATHER_URL = 'https://api.openweathermap.org/data/2.5/forecast'
 WORD_URL = 'https://api.wordnik.com/v4/words.json/wordOfTheDay'
 OTD_URL = 'https://today.zenquotes.io/api'
 BASEBALL_URL = f"http://lookup-service-prod.mlb.com/json/named.team_all_season.bam?sport_code='mlb'&all_star_sw='N'&sort_order=name_asc&season={datetime.now().year}"
+BASKETBALL_URL = f"https://api-basketball.p.rapidapi.com/games"
 
+sleeping = False
+basketballSchedule = False
+updateCountdown = 0
+basketballScheduleCountdown = 0
 
 # --------------
-
 
 def getDenverWeather():
     params = {
@@ -29,57 +32,35 @@ def getDenverWeather():
     if data["cod"] == "200":
         weatherDesc = data["list"][0]["weather"][0]["main"]
         tempMax = data["list"][0]["main"]["temp_max"]
+        percipChance = data["list"][0]["pop"]
         temp = round((tempMax - 273.15) * (9/5) + 32, 1)
-        return f"Weather:{weatherDesc}\nTemp:{temp}F"
+        return f"Weather: {weatherDesc}\nTemp: {temp}F\nPercip %: {percipChance}"
     else:
         return "Error fetching weather"
 
-def getOnThisDay():
-    def cleanText(text):
-        text = html.unescape(text)
-        text = text.split('–', 1)[-1].strip()
-        return text
+def getBasketballRealtime(gameId):
+    global updateCountdown
 
-    # Parse the JSON string to a Python dictionary
-    apiResponse = requests.get(OTD_URL)
-    data = apiResponse.json()
+    url = f"https://api-basketball.p.rapidapi.com/games/{gameId}"
 
-    # Extract the events, births, and deaths data
-    events = data['data']['Events']
-    births = data['data']['Births']
-    deaths = data['data']['Deaths']
+    headers = {
+        'x-rapidapi-host': "api-basketball.p.rapidapi.com",
+        'x-rapidapi-key': RAPID_API_KEY
+    }
 
-    # Combine all the text entries into a single list
-    all_entries = events + births + deaths
-
-    # Filter the entries to only include those with text under 120 characters
-    short_entries = [cleanText(entry['text']) for entry in all_entries if len(entry['text']) < 119]
-
-    # Pick a random entry from the filtered list
-    if short_entries:
-        random_entry = random.choice(short_entries)
-        return(f"On this Day: {random_entry}")
-    else:
-        print("No entries found with text under 119 characters.")
-
-def getWordOfTheDay():
-    params = {'api_key': WORD_API_KEY}
-    response = requests.get(WORD_URL, params=params)
+    response = requests.request("GET", url, headers=headers)
     data = response.json()
-    return f"{data['word']}:{data['definitions'][0]['text']}"[:40]
 
-def getBaseballStats():
-    teams = [111, 136, 115] # This is red sox, rockies & mariners
-    team = random.choice(teams)
-    most_recent_game_id = statsapi.last_game(team)
-    bs_data = statsapi.boxscore_data(most_recent_game_id)
+    homeTeam = data['api']['games'][0]['teams']['home']['team_name']
+    awayTeam = data['api']['games'][0]['teams']['away']['team_name']
+    homeScore = data['api']['games'][0]['scores']['home']['total']
+    awayScore = data['api']['games'][0]['scores']['away']['total']
+    status = data['api']['games'][0]['status']['long']
+    statusCleaned = re.sub(r"\s*\(.*?\)", "", status)
 
-    homeTeam = bs_data["teamInfo"]["home"]["abbreviation"]
-    awayTeam = bs_data["teamInfo"]["away"]["abbreviation"]
-    homeScore = bs_data["homeBattingTotals"]["r"]
-    awayScore = bs_data["awayBattingTotals"]["r"]
     
-    return(f"{homeTeam} vs {awayTeam}\n {homeScore} to {awayScore}")
+    updateCountdown = int(60 * 2.5) # Update every 2.5 minutes
+    return f"{homeTeam} vs {awayTeam}\n{statusCleaned}\n{homeScore} to {awayScore}"
 
 # --------------
 
@@ -92,30 +73,104 @@ def displayMessage(message):
     else:
         print(f"Failed to display. Status code: {response.status_code}")
 
-def getRandomDisplay():
-    funcs = [
-        getDenverWeather,
-        # getWordOfTheDay,
-        getOnThisDay,
-        getBaseballStats
-    ]
-    selectedFunc = random.choice(funcs)
-    displayMessage(selectedFunc())
+def getRealtimeDisplay():
+    global basketballSchedule, updateCountdown
+    # Check basketball to see if it's live
+
+    if basketballSchedule:
+        mst = timezone(timedelta(hours=-7))
+
+        # Get the current time in MST
+        now = datetime.now(mst)
+
+        for game_time, game_id, homeTeam, awayTeam in basketballSchedule:
+            # Check if current time is within 3 hours of the game
+            game_start_time = datetime.strptime(game_time, "%Y-%m-%dT%H:%M:%S%z")
+            time_difference = game_start_time - now
+            time_difference_seconds = time_difference.total_seconds()
+
+            if 60 * 10 >= time_difference_seconds >= 0:  # 15 minutes in seconds
+                minutes, seconds = divmod(abs(int(time_difference_seconds)), 60)
+                updateCountdown = 60
+                return f"{homeTeam} vs {awayTeam} starting in {minutes} mins"
+                
+            elif 0 < time_difference_seconds <= -10800:  # 3 hours in seconds
+                return getBasketballRealtime(game_id)
+    
+    updateCountdown = 60 * 20
+    return getDenverWeather()
+    
+def quietHoursSleep():
+    global sleeping
+
+    time.sleep(3600)
+    sleeping = True
+
+def checkBasketballSchedule():
+    global basketballScheduleCountdown
+
+    teams = ["Denver Nuggets", "Boston Celtics"]
+    leagueId = "12"  # NBA League ID
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    url = "https://api-basketball.p.rapidapi.com/games"
+
+    headers = {
+        'x-rapidapi-host': "api-basketball.p.rapidapi.com",
+        'x-rapidapi-key': RAPID_API_KEY
+    }
+
+    querystring = {"date": today, "league": leagueId, "season": "2023-2024", "timezone": "America/Denver"}
+    response = requests.request("GET", url, headers=headers, params=querystring)
+    data = response.json()
+    result = []
+    for game in data['response']:
+        # Check if either team is playing
+        homeTeam = game['teams']['home']['name'].split()[1]
+        awayTeam = game['teams']['away']['name'].split()[1]
+        print("home: " + homeTeam)
+        print("away: " + awayTeam)
+        print(game)
+        if homeTeam in teams or awayTeam in teams:
+            # Save the time of the game, game ID, and team names
+            result.append([game['date'], game['id'], homeTeam, awayTeam])
+    
+    basketballScheduleCountdown = 60 * 60
+
+    if result == []:
+        return False
+    else:
+        print(result)
+        return result
+
+def wakeUp():
+    global sleeping, basketballSchedule
+
+    if sleeping:
+        basketballSchedule = checkBasketballSchedule()
+        sleeping = False
 
 if __name__ == "__main__":
-    getRandomDisplay()
+
+    basketballSchedule = checkBasketballSchedule()
+    displayMessage(getRealtimeDisplay())
+    
     while True:
         now = datetime.now()
         current_hour = now.hour
 
-        # Check if the current time is within "quiet hours" (11pm to 6am)
         if current_hour >= 23 or current_hour < 6:
-            time.sleep(3600)
-        else:
-            # Update at the top of each hour and at the 20 minute mark
-            if now.minute == 0 or now.minute == 20 or now.minute == 40:
-                getRandomDisplay()
-                time.sleep(60)
-            else:
-                time.sleep(30)
+            quietHoursSleep()
 
+        else:
+            if sleeping: wakeUp()
+
+            if updateCountdown == 0:
+                displayMessage(getRealtimeDisplay())
+            
+            if basketballScheduleCountdown == 0:
+                basketballSchedule = checkBasketballSchedule()
+            
+            time.sleep(1)
+            updateCountdown -= 1
+            basketballScheduleCountdown -= 1
