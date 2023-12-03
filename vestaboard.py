@@ -18,6 +18,7 @@ sleeping = False
 basketballSchedule = False
 updateCountdown = 0
 basketballScheduleCountdown = 0
+gameOn = False
 
 # --------------
 
@@ -34,7 +35,9 @@ def getDenverWeather():
         tempMax = data["list"][0]["main"]["temp_max"]
         percipChance = data["list"][0]["pop"]
         temp = round((tempMax - 273.15) * (9/5) + 32, 1)
-        return f"Weather: {weatherDesc}\nTemp: {temp}F\nPercip %: {percipChance}"
+        daysUntil = days_until_christmas()
+        return f"Weather: {weatherDesc}\nTemp: {temp}F\nPercip %: {percipChance*100}\nDays until xmas: {daysUntil}"
+        # return f"Weather: {weatherDesc}\nTemp: {temp}F\nPercip %: {percipChance}"
     else:
         return "Error fetching weather"
 
@@ -59,7 +62,7 @@ def getBasketballRealtime(gameId):
     statusCleaned = re.sub(r"\s*\(.*?\)", "", status)
 
     
-    updateCountdown = int(60 * 2.5) # Update every 2.5 minutes
+    updateCountdown = int(60 * 4) # Update every 4 minutes
     return f"{homeTeam} vs {awayTeam}\n{statusCleaned}\n{homeScore} to {awayScore}"
 
 # --------------
@@ -71,13 +74,23 @@ def displayMessage(message):
     if response.status_code == 200:
         print(f"Displayed: {message}")
     else:
+        print(message)
         print(f"Failed to display. Status code: {response.status_code}")
 
+def days_until_christmas():
+    # Get the current date
+    current_date = datetime.now()
+    christmas_date = datetime(current_date.year, 12, 25)
+    if current_date > christmas_date:
+        christmas_date = datetime(current_date.year + 1, 12, 25)
+    days_until = (christmas_date - current_date).days
+    return days_until
+
 def getRealtimeDisplay():
-    global basketballSchedule, updateCountdown
+    global basketballSchedule, updateCountdown, gameOn
     # Check basketball to see if it's live
 
-    if basketballSchedule:
+    if basketballSchedule or gameOn:
         mst = timezone(timedelta(hours=-7))
 
         # Get the current time in MST
@@ -89,12 +102,17 @@ def getRealtimeDisplay():
             time_difference = game_start_time - now
             time_difference_seconds = time_difference.total_seconds()
 
-            if 60 * 10 >= time_difference_seconds >= 0:  # 15 minutes in seconds
+            if 60 * 10 >= time_difference_seconds >= 0 and not gameOn:  # 10 minutes in seconds
                 minutes, seconds = divmod(abs(int(time_difference_seconds)), 60)
+
+                if minutes == 1: gameOn = {"timeStart": now, "game_id": game_id}
+
                 updateCountdown = 60
                 return f"{homeTeam} vs {awayTeam} starting in {minutes} mins"
                 
-            elif 0 < time_difference_seconds <= -10800:  # 3 hours in seconds
+            elif gameOn and game_id == gameOn.game_id:
+                gameOnDifference = now - gameOn.timeStart
+                if gameOnDifference.total_seconds() >= 10800: gameOn = False
                 return getBasketballRealtime(game_id)
     
     updateCountdown = 60 * 20
@@ -128,9 +146,6 @@ def checkBasketballSchedule():
         # Check if either team is playing
         homeTeam = game['teams']['home']['name'].split()[1]
         awayTeam = game['teams']['away']['name'].split()[1]
-        print("home: " + homeTeam)
-        print("away: " + awayTeam)
-        print(game)
         if homeTeam in teams or awayTeam in teams:
             # Save the time of the game, game ID, and team names
             result.append([game['date'], game['id'], homeTeam, awayTeam])
@@ -140,7 +155,6 @@ def checkBasketballSchedule():
     if result == []:
         return False
     else:
-        print(result)
         return result
 
 def wakeUp():
@@ -153,7 +167,6 @@ def wakeUp():
 if __name__ == "__main__":
 
     basketballSchedule = checkBasketballSchedule()
-    displayMessage(getRealtimeDisplay())
     
     while True:
         now = datetime.now()
