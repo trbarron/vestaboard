@@ -9,7 +9,7 @@ A Python-based controller for Vestaboard that displays personalized real-time in
 This script updates the Vestaboard every 20 minutes:
 - **Current Weather**: Temperature and precipitation chance for your location
 - **Work/Activity Time**: Fetches time data from [cat work tracker](https://tylerbarron.com/CatTracker)
-- **Custom Date Counter**: Tracks days/weeks since a specified date
+- **Custom Date Counter**: Tracks time since a specified date (months or weeks format)
 - **Quiet Hours**: Automatically pauses updates during nighttime (11 PM - 6 AM)
 
 ## Setup
@@ -27,7 +27,7 @@ This script updates the Vestaboard every 20 minutes:
    - **Weather**: Sign up for a free API key at [OpenWeatherMap](https://openweathermap.org/api)
 
 4. **Customize Your Display**:
-   - Date tracking: Edit your dates and counter label in `config.py`
+   - Date tracking: Edit your dates, counter label, and format (months/weeks) in `config.py`
    - Custom API endpoints: Edit `vestaboard.py` line 21
    - Update intervals and quiet hours: Edit `vestaboard.py` lines 24-27
 
