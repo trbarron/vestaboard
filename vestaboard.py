@@ -1,3 +1,4 @@
+import calendar
 import requests
 import time
 import json
@@ -10,7 +11,8 @@ from config import (
     WEATHER_LON,
     COUNTDOWN_TARGET_DATE,
     COUNTER_START_DATE,
-    COUNTER_LABEL
+    COUNTER_LABEL,
+    COUNTER_USE_MONTHS
 )
 
 # Configure logging
@@ -37,36 +39,84 @@ SLEEP_DURATION = 3600  # 1 hour
 # Global state
 updateCountdown = 0
 
-def days_until(target_date):
-    """Calculate days until a target date, handling year rollover"""
+def days_until(target_date, use_months=None):
+    """Calculate time until a target date, handling year rollover"""
+    if use_months is None:
+        use_months = COUNTER_USE_MONTHS
+
     try:
         current_date = datetime.now()
-        target_date = datetime.strptime(target_date, "%Y-%m-%d")
-        if current_date > target_date:
-            target_date = datetime(current_date.year + 1, target_date.month, target_date.day)
-        days_until = (target_date - current_date).days
-        return days_until + 1
+        target = datetime.strptime(target_date, "%Y-%m-%d")
+
+        # Handle year rollover for recurring dates
+        if current_date > target:
+            target = datetime(current_date.year + 1, target.month, target.day)
+
+        if use_months:
+            # Calculate months difference
+            months = (target.year - current_date.year) * 12 + (target.month - current_date.month)
+            days = target.day - current_date.day
+
+            # Only show negative days when within 5 days of the monthly mark
+            # Otherwise, show positive days since the last monthly mark
+            if days < -5:
+                months -= 1
+                # Get days in previous month
+                if current_date.month == 1:
+                    prev_month_days = calendar.monthrange(current_date.year - 1, 12)[1]
+                else:
+                    prev_month_days = calendar.monthrange(current_date.year, current_date.month - 1)[1]
+                days += prev_month_days
+
+            return f"{months}m {days}d"
+        else:
+            # Calculate weeks and days
+            days_diff = (target - current_date).days + 1
+            weeks = days_diff // 7
+            remaining_days = days_diff % 7
+            return f"{weeks}w {remaining_days}d"
     except ValueError as e:
         logger.error(f"Invalid date format for target_date: {target_date}")
-        return 0
+        return "0m 0d" if use_months else "0w 0d"
 
-def days_since(start_date):
-    """Calculate weeks and days since a given date"""
+def days_since(start_date, use_months=None):
+    """Calculate time since a given date"""
+    if use_months is None:
+        use_months = COUNTER_USE_MONTHS
+
     try:
         current_date = datetime.now()
-        start_date = datetime.strptime(start_date, "%Y-%m-%d")
-        
-        if current_date < start_date:
-            return "0w 0d"
-        
-        days_diff = (current_date - start_date).days
-        weeks = days_diff // 7
-        remaining_days = days_diff % 7
-        
-        return f"{weeks}w {remaining_days}d"
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+
+        if current_date < start:
+            return "0m 0d" if use_months else "0w 0d"
+
+        if use_months:
+            # Calculate months difference
+            months = (current_date.year - start.year) * 12 + (current_date.month - start.month)
+            days = current_date.day - start.day
+
+            # Only show negative days when within 5 days of the monthly anniversary
+            # Otherwise, show positive days since the last anniversary
+            if days < -5:
+                months -= 1
+                # Get days in previous month
+                if current_date.month == 1:
+                    prev_month_days = calendar.monthrange(current_date.year - 1, 12)[1]
+                else:
+                    prev_month_days = calendar.monthrange(current_date.year, current_date.month - 1)[1]
+                days += prev_month_days
+
+            return f"{months}m {days}d"
+        else:
+            # Calculate weeks and days
+            days_diff = (current_date - start).days
+            weeks = days_diff // 7
+            remaining_days = days_diff % 7
+            return f"{weeks}w {remaining_days}d"
     except ValueError as e:
         logger.error(f"Invalid date format for start_date: {start_date}")
-        return "0w 0d"
+        return "0m 0d" if use_months else "0w 0d"
 
 def get_denver_weather():
     """Fetch and format current weather information from configured location"""
