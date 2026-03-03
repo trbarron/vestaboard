@@ -27,7 +27,7 @@ HEADERS = {
 
 VESTABOARD_URL = 'https://rw.vestaboard.com/'
 WEATHER_CURRENT_URL = 'https://api.openweathermap.org/data/2.5/weather'
-WEATHER_FORECAST_URL = 'https://api.openweathermap.org/data/2.5/forecast'
+WEATHER_UV_URL = 'https://api.open-meteo.com/v1/forecast'
 ENDPOINT_URL = 'https://nj3ho46btl.execute-api.us-west-2.amazonaws.com/default/checoRestEndpoint'
 
 # Configuration
@@ -133,25 +133,29 @@ def get_denver_weather():
         current_response.raise_for_status()
         current_data = current_response.json()
         
-        # Get forecast for precipitation chance
-        forecast_response = requests.get(WEATHER_FORECAST_URL, params=params, timeout=10)
-        forecast_response.raise_for_status()
-        forecast_data = forecast_response.json()
-        
+        # Get UV index from Open-Meteo (free, no API key required)
+        uv_params = {
+            'latitude': WEATHER_LAT,
+            'longitude': WEATHER_LON,
+            'current': 'uv_index'
+        }
+        uv_response = requests.get(WEATHER_UV_URL, params=uv_params, timeout=10)
+        uv_response.raise_for_status()
+        uv_data = uv_response.json()
+
         # Extract current temperature
         if current_data.get("cod") == 200:
             temp = round(current_data["main"]["temp"], 1)
         else:
             logger.warning(f"Current weather API returned unexpected data: {current_data.get('cod')}")
             return "Weather: Unavailable"
-        
-        # Extract precipitation chance from forecast
-        percip_chance = 0
-        if forecast_data.get("cod") == "200" and forecast_data.get("list"):
-            # Get the precipitation probability from the next forecast period
-            percip_chance = round(forecast_data["list"][0]["pop"] * 100, 1)
-        
-        return f"Temp: {temp}F\nPrecip: {percip_chance}%"
+
+        # Extract UV index
+        uv_index = uv_data.get("current", {}).get("uv_index", "N/A")
+        if isinstance(uv_index, float):
+            uv_index = round(uv_index, 1)
+
+        return f"Temp: {temp}F\nUV: {uv_index}"
         
     except requests.RequestException as e:
         logger.error(f"Failed to fetch weather: {e}")
