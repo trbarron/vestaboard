@@ -16,7 +16,14 @@ from config import (
 )
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("vestaboard.log"),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Constants
@@ -120,6 +127,10 @@ def days_since(start_date, use_months=None):
 
 def get_denver_weather():
     """Fetch and format current weather information from configured location"""
+    temp = "N/A"
+    uv_index = "N/A"
+
+    # Fetch Temperature
     try:
         params = {
             'lat': WEATHER_LAT,
@@ -133,7 +144,16 @@ def get_denver_weather():
         current_response.raise_for_status()
         current_data = current_response.json()
         
-        # Get UV index from Open-Meteo (free, no API key required)
+        if current_data.get("cod") == 200:
+            temp_val = current_data["main"]["temp"]
+            temp = f"{round(temp_val, 1)}F"
+        else:
+            logger.warning(f"Current weather API returned unexpected data: {current_data.get('cod')}")
+    except Exception as e:
+        logger.error(f"Failed to fetch or parse temperature: {e}")
+
+    # Fetch UV Index
+    try:
         uv_params = {
             'latitude': WEATHER_LAT,
             'longitude': WEATHER_LON,
@@ -143,26 +163,14 @@ def get_denver_weather():
         uv_response.raise_for_status()
         uv_data = uv_response.json()
 
-        # Extract current temperature
-        if current_data.get("cod") == 200:
-            temp = round(current_data["main"]["temp"], 1)
-        else:
-            logger.warning(f"Current weather API returned unexpected data: {current_data.get('cod')}")
-            return "Weather: Unavailable"
-
         # Extract UV index
-        uv_index = uv_data.get("current", {}).get("uv_index", "N/A")
-        if isinstance(uv_index, float):
-            uv_index = round(uv_index, 1)
+        uv_val = uv_data.get("current", {}).get("uv_index", "N/A")
+        if isinstance(uv_val, (float, int)):
+            uv_index = round(uv_val, 1)
+    except Exception as e:
+        logger.error(f"Failed to fetch or parse UV index: {e}")
 
-        return f"Temp: {temp}F\nUV: {uv_index}"
-        
-    except requests.RequestException as e:
-        logger.error(f"Failed to fetch weather: {e}")
-        return "Weather: Error"
-    except (KeyError, IndexError) as e:
-        logger.error(f"Failed to parse weather data: {e}")
-        return "Weather: Parse Error"
+    return f"Temp: {temp}\nUV: {uv_index}"
 
 def get_countdown():
     """Get countdown to target date"""
