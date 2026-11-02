@@ -2,10 +2,13 @@
 
 Run with: python -m unittest test_vestaboard
 """
+import json
+import logging
 import sys
 import types
 import unittest
 from datetime import datetime
+from unittest import mock
 
 # Stub out config so vestaboard can be imported without a real config.py
 _fake_config = types.ModuleType("config")
@@ -82,6 +85,49 @@ class TestDaysSince(unittest.TestCase):
     def test_invalid_format(self):
         self.assertEqual(vestaboard.days_since("not-a-date", use_months=True), "0m 0d")
         self.assertEqual(vestaboard.days_since("not-a-date", use_months=False), "0w 0d")
+
+
+class TestRedactSecretsFilter(unittest.TestCase):
+    def _redact(self, msg, args=None):
+        record = logging.LogRecord("t", logging.ERROR, __file__, 0, msg, args, None)
+        vestaboard.RedactSecretsFilter().filter(record)
+        return record.getMessage()
+
+    def test_masks_appid_in_url(self):
+        msg = "Failed: /data/2.5/weather?lat=1&appid=abc123def&units=imperial"
+        out = self._redact(msg)
+        self.assertNotIn("abc123def", out)
+        self.assertIn("appid=REDACTED&units=imperial", out)
+
+    def test_masks_appid_in_args(self):
+        out = self._redact("Failed: %s", ("url?appid=secret')",))
+        self.assertNotIn("secret", out)
+
+    def test_leaves_other_messages_alone(self):
+        self.assertEqual(self._redact("all good"), "all good")
+
+
+class TestGetWorkTime(unittest.TestCase):
+    def _work_time_for(self, payload):
+        response = mock.Mock()
+        response.json.return_value = payload
+        response.raise_for_status.return_value = None
+        with mock.patch.object(vestaboard.requests, "get", return_value=response):
+            return vestaboard.get_work_time()
+
+    def test_body_as_json_string(self):
+        body = json.dumps({"work_time": "1:05:00", "tuni_time": "1:05:00", "checo_time": "0:00:00"})
+        self.assertEqual(self._work_time_for({"body": body}), "Tuni: 1:05")
+
+    def test_body_as_object(self):
+        body = {"work_time": "0:10:00"}
+        self.assertEqual(self._work_time_for({"body": body}), "Cats: 0:10")
+
+    def test_body_unexpected_type(self):
+        self.assertEqual(self._work_time_for({"body": 42}), "Cats: Parse Error")
+
+    def test_body_invalid_json(self):
+        self.assertEqual(self._work_time_for({"body": "not json"}), "Cats: Parse Error")
 
 
 if __name__ == "__main__":

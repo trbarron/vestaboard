@@ -1,4 +1,5 @@
 import calendar
+import re
 import requests
 import time
 import json
@@ -14,14 +15,23 @@ from config import (
     COUNTER_USE_MONTHS
 )
 
-# Configure logging
+class RedactSecretsFilter(logging.Filter):
+    """Mask API keys that requests embeds in exception messages (e.g. appid=...)"""
+    _pattern = re.compile(r'(appid=)[^&\s\'")]+')
+
+    def filter(self, record):
+        record.msg = self._pattern.sub(r'\1REDACTED', record.getMessage())
+        record.args = None
+        return True
+
+# Log to stderr only. monitor_script.sh redirects the process's output into
+# vestaboard.log, so a FileHandler here would write every line twice.
+_handler = logging.StreamHandler()
+_handler.addFilter(RedactSecretsFilter())
 logging.basicConfig(
-    level=logging.INFO, 
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("vestaboard.log"),
-        logging.StreamHandler()
-    ]
+    handlers=[_handler]
 )
 logger = logging.getLogger(__name__)
 
@@ -86,7 +96,7 @@ def days_since(start_date, use_months=None):
         logger.error(f"Invalid date format for start_date: {start_date}")
         return "0m 0d" if use_months else "0w 0d"
 
-def get_denver_weather():
+def get_weather():
     """Fetch and format current weather information from configured location"""
     temp = "N/A"
     uv_index = "N/A"
@@ -133,7 +143,7 @@ def get_denver_weather():
 
     return f"Temp: {temp}\nUV: {uv_index}"
 
-def get_ollie_counter():
+def get_counter():
     """Get counter since start date"""
     counter_days = days_since(COUNTER_START_DATE)
     return f"{COUNTER_LABEL}: {counter_days}"
@@ -174,9 +184,14 @@ def get_work_time():
         response.raise_for_status()
 
         data = response.json()
-        body_str = data.get('body', '{}')
-        body = json.loads(body_str)
-        work_time = body.get('work_time', '00:00')
+        body = data.get('body', '{}')
+        # The endpoint wraps its payload as a JSON string, but accept an
+        # already-decoded object too.
+        if isinstance(body, str):
+            body = json.loads(body)
+        if not isinstance(body, dict):
+            raise ValueError(f"Unexpected body type: {type(body).__name__}")
+        work_time = str(body.get('work_time', '00:00'))
 
         # Extract hours and minutes
         time_parts = work_time.split(':')
@@ -196,7 +211,7 @@ def get_work_time():
     except requests.RequestException as e:
         logger.error(f"Failed to fetch work time: {e}")
         return "Cats: Unavailable"
-    except (json.JSONDecodeError, KeyError) as e:
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
         logger.error(f"Failed to parse work time data: {e}")
         return "Cats: Parse Error"
 
@@ -215,9 +230,9 @@ def display_message(message):
 def get_realtime_display():
     """Build the complete display message"""
     display_lines = [
-        get_denver_weather(),
+        get_weather(),
         get_work_time(),
-        get_ollie_counter(),
+        get_counter(),
     ]
     return "\n".join(display_lines)
 

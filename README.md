@@ -49,7 +49,69 @@ chmod +x monitor_script.sh
 ./monitor_script.sh
 ```
 
-Add to crontab for automatic restart on reboot:
+Add to crontab so it starts after a reboot and restarts if it dies or hangs (the script restarts the service if its log hasn't grown in 2 hours):
 ```bash
-*/5 * * * * /path/to/monitor_script.sh
+* * * * * /path/to/monitor_script.sh
 ```
+
+The script logs to stderr; `monitor_script.sh` appends that to `vestaboard.log`. To rotate the log, install the included logrotate config:
+```bash
+sudo cp vestaboard.logrotate /etc/logrotate.d/vestaboard
+```
+
+## Deployment (Raspberry Pi)
+
+The live board is driven by a Raspberry Pi Zero 2 W on the home network. The same Pi also runs CatFinder (the IMX500 camera cat classifier behind the cat work tracker).
+
+| | |
+|---|---|
+| Hostname | `raspberrypi2.local` (last seen at `192.168.68.70`) |
+| User | `admin` (password not stored in this repo) |
+| OS | Raspberry Pi OS (Debian 12) |
+| Code | `/home/admin/Vestaboard` (CatFinder lives in `/home/admin/CatFinder`) |
+| Log | `/home/admin/Vestaboard/vestaboard.log` |
+
+There is a second Pi Zero 2 W on the network (Raspbian 10, seen at `192.168.68.55`). It is **not** the Vestaboard Pi, and it doesn't accept the same credentials.
+
+### Connecting
+
+```bash
+ssh admin@raspberrypi2.local
+```
+
+If `raspberrypi2.local` doesn't resolve (mDNS is flaky on this network), find the Pi by scanning for SSH, then connect by IP:
+
+```bash
+for i in $(seq 1 254); do (nc -z -G 1 192.168.68.$i 22 2>/dev/null && echo 192.168.68.$i) & done; wait
+```
+
+If the Pi doesn't answer at all, it has probably hung. Power-cycle it; cron restarts both services within a minute of boot.
+
+### How it runs
+
+There is no systemd service. The `admin` crontab runs each project's monitor script every minute, and the script starts the Python process if it isn't running:
+
+```
+* * * * * cd /home/admin/CatFinder && /home/admin/CatFinder/monitor_script.sh
+* * * * * cd /home/admin/Vestaboard && /home/admin/Vestaboard/monitor_script.sh
+```
+
+Useful checks once connected:
+
+```bash
+pgrep -af "vestaboard.py|cat_finder.py"   # are both running?
+tail -f ~/Vestaboard/vestaboard.log         # latest board updates
+journalctl --list-boots                     # spot reboots or hangs
+vcgencmd get_throttled                      # 0x0 = no undervoltage/throttling
+```
+
+### Deploying changes
+
+The Pi's copy isn't a git checkout. Copy the changed files over, then kill the process so cron restarts it on the new code:
+
+```bash
+scp vestaboard.py admin@raspberrypi2.local:/home/admin/Vestaboard/
+ssh admin@raspberrypi2.local 'pkill -f "Vestaboard/vestaboard.py"'
+```
+
+`config.py` (API keys) exists only on the Pi and isn't committed.

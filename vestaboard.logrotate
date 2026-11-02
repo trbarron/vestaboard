@@ -1,0 +1,15 @@
+# Install: sudo cp vestaboard.logrotate /etc/logrotate.d/vestaboard
+#
+# copytruncate is required: monitor_script.sh opens the log with `>>` and the
+# process holds that fd for its whole life, so it never reopens the path.
+
+/home/admin/Vestaboard/vestaboard.log {
+    weekly
+    rotate 4
+    maxsize 5M
+    copytruncate
+    compress
+    delaycompress
+    missingok
+    notifempty
+}
