@@ -7,8 +7,8 @@ A Python-based controller for Vestaboard that displays personalized real-time in
 ## What It Does
 
 This script updates the Vestaboard every 20 minutes:
-- **Current Weather**: Temperature and precipitation chance for your location
-- **Work/Activity Time**: Fetches time data from [cat work tracker](https://tylerbarron.com/CatTracker)
+- **Current Weather**: Temperature and UV index for your location
+- **Work/Activity Time**: Fetches time data from [cat work tracker](https://tylerbarron.com/CatTracker). When the cats have logged more than 30 minutes and one cat accounts for 80%+ of that time, the line credits that cat by name (`Tuni:` / `Checo:`) instead of the generic `Cats:`.
 - **Custom Date Counter**: Tracks time since a specified date (months or weeks format)
 - **Quiet Hours**: Automatically pauses updates during nighttime (11 PM - 6 AM)
 
@@ -16,7 +16,7 @@ This script updates the Vestaboard every 20 minutes:
 
 1. **Install Dependencies**:
    ```bash
-   pip install requests
+   pip install -r requirements.txt
    ```
 
 2. **Configure API Keys**:
@@ -24,12 +24,17 @@ This script updates the Vestaboard every 20 minutes:
 
 3. **Get API Keys**:
    - **Vestaboard**: Get your Read/Write key from [Vestaboard API](https://www.vestaboard.com/)
-   - **Weather**: Sign up for a free API key at [OpenWeatherMap](https://openweathermap.org/api)
+   - **Weather**: Sign up for a free API key at [OpenWeatherMap](https://openweathermap.org/api). The UV index comes from [Open-Meteo](https://open-meteo.com/), which needs no key.
 
 4. **Customize Your Display**:
    - Date tracking: Edit your dates, counter label, and format (months/weeks) in `config.py`
-   - Custom API endpoints: Edit `vestaboard.py` line 21
-   - Update intervals and quiet hours: Edit `vestaboard.py` lines 24-27
+   - Custom API endpoints, update interval, and quiet hours: Edit the constants near the top of `vestaboard.py`
+
+## Running Tests
+
+```bash
+python -m unittest test_vestaboard
+```
 
 ## Running the Script
 

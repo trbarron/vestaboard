@@ -9,7 +9,6 @@ from config import (
     WEATHER_API_KEY,
     WEATHER_LAT,
     WEATHER_LON,
-    COUNTDOWN_TARGET_DATE,
     COUNTER_START_DATE,
     COUNTER_LABEL,
     COUNTER_USE_MONTHS
@@ -43,48 +42,10 @@ QUIET_HOURS_START = 23
 QUIET_HOURS_END = 6
 SLEEP_DURATION = 3600  # 1 hour
 
-# Global state
-updateCountdown = 0
-
-def days_until(target_date, use_months=None):
-    """Calculate time until a target date, handling year rollover"""
-    if use_months is None:
-        use_months = COUNTER_USE_MONTHS
-
-    try:
-        current_date = datetime.now()
-        target = datetime.strptime(target_date, "%Y-%m-%d")
-
-        # Handle year rollover for recurring dates
-        if current_date > target:
-            target = datetime(current_date.year + 1, target.month, target.day)
-
-        if use_months:
-            # Calculate months difference
-            months = (target.year - current_date.year) * 12 + (target.month - current_date.month)
-            days = target.day - current_date.day
-
-            # Only show negative days when within 5 days of the monthly mark
-            # Otherwise, show positive days since the last monthly mark
-            if days < -5:
-                months -= 1
-                # Get days in previous month
-                if current_date.month == 1:
-                    prev_month_days = calendar.monthrange(current_date.year - 1, 12)[1]
-                else:
-                    prev_month_days = calendar.monthrange(current_date.year, current_date.month - 1)[1]
-                days += prev_month_days
-
-            return f"{months}m {days}d"
-        else:
-            # Calculate weeks and days
-            days_diff = (target - current_date).days + 1
-            weeks = days_diff // 7
-            remaining_days = days_diff % 7
-            return f"{weeks}w {remaining_days}d"
-    except ValueError as e:
-        logger.error(f"Invalid date format for target_date: {target_date}")
-        return "0m 0d" if use_months else "0w 0d"
+# Credit a single cat by name once total worked time exceeds this threshold
+# and one cat accounts for at least WORK_TIME_NAME_SHARE of it.
+WORK_TIME_NAME_THRESHOLD = 30 * 60  # 30 minutes, in seconds
+WORK_TIME_NAME_SHARE = 0.8  # 80%
 
 def days_since(start_date, use_months=None):
     """Calculate time since a given date"""
@@ -172,35 +133,66 @@ def get_denver_weather():
 
     return f"Temp: {temp}\nUV: {uv_index}"
 
-def get_countdown():
-    """Get countdown to target date"""
-    days_until_val = days_until(COUNTDOWN_TARGET_DATE)
-    return f"Due In {days_until_val}"
-
 def get_ollie_counter():
     """Get counter since start date"""
     counter_days = days_since(COUNTER_START_DATE)
     return f"{COUNTER_LABEL}: {counter_days}"
+
+def parse_time_to_seconds(time_str):
+    """Parse a 'H:MM:SS' or 'MM:SS' time string into total seconds"""
+    try:
+        parts = [int(p) for p in time_str.split(':')]
+    except (ValueError, AttributeError):
+        return 0
+
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+    elif len(parts) == 2:
+        hours, minutes, seconds = 0, parts[0], parts[1]
+    else:
+        return 0
+
+    return hours * 3600 + minutes * 60 + seconds
+
+def get_work_time_label(total_seconds, tuni_seconds, checo_seconds):
+    """Return the display label for the work time line.
+
+    Once the cats have worked more than 30 minutes and one cat accounts for
+    80%+ of that time, credit that cat by name instead of the generic "Cats".
+    """
+    if total_seconds > WORK_TIME_NAME_THRESHOLD and total_seconds > 0:
+        if tuni_seconds / total_seconds >= WORK_TIME_NAME_SHARE:
+            return "Tuni"
+        if checo_seconds / total_seconds >= WORK_TIME_NAME_SHARE:
+            return "Checo"
+    return "Cats"
 
 def get_work_time():
     """Fetch and format work time from external API"""
     try:
         response = requests.get(ENDPOINT_URL, timeout=10)
         response.raise_for_status()
-        
+
         data = response.json()
         body_str = data.get('body', '{}')
         body = json.loads(body_str)
         work_time = body.get('work_time', '00:00')
-        
+
         # Extract hours and minutes
         time_parts = work_time.split(':')
         if len(time_parts) >= 2:
             work_time_hours = f"{time_parts[0]}:{time_parts[1]}"
         else:
             work_time_hours = "00:00"
-            
-        return f"Cats: {work_time_hours}"
+
+        # Credit a single cat by name when they dominate the worked time
+        label = get_work_time_label(
+            parse_time_to_seconds(work_time),
+            parse_time_to_seconds(body.get('tuni_time', '0:00:00')),
+            parse_time_to_seconds(body.get('checo_time', '0:00:00')),
+        )
+
+        return f"{label}: {work_time_hours}"
     except requests.RequestException as e:
         logger.error(f"Failed to fetch work time: {e}")
         return "Cats: Unavailable"
@@ -222,41 +214,12 @@ def display_message(message):
 
 def get_realtime_display():
     """Build the complete display message"""
-    global updateCountdown
-    updateCountdown = UPDATE_INTERVAL
-    
-    display_lines = []
-    
-    # Weather information
-    weather_info = get_denver_weather()
-    display_lines.append(weather_info)
-    
-    # Countdown
-    # countdown_info = get_countdown()
-    # display_lines.append(countdown_info)
-    
-    # Work time
-    work_time_info = get_work_time()
-    display_lines.append(work_time_info)
-    
-    # Ollie counter
-    ollie_info = get_ollie_counter()
-    display_lines.append(ollie_info)
-    
+    display_lines = [
+        get_denver_weather(),
+        get_work_time(),
+        get_ollie_counter(),
+    ]
     return "\n".join(display_lines)
-
-def quiet_hours_sleep(sleeping):
-    """Handle quiet hours sleep mode"""
-    logger.info("Entering quiet hours sleep mode")
-    time.sleep(SLEEP_DURATION)
-    return True
-
-def wake_up(sleeping):
-    """Handle wake up from sleep mode"""
-    if sleeping:
-        logger.info("Waking up from sleep mode")
-        return False
-    return sleeping
 
 def is_quiet_hours():
     """Check if current time is during quiet hours"""
@@ -265,18 +228,15 @@ def is_quiet_hours():
 
 if __name__ == "__main__":
     logger.info("Starting Vestaboard display service")
-    sleeping = False
-    
+
     while True:
         try:
             if is_quiet_hours():
-                sleeping = quiet_hours_sleep(sleeping)
+                logger.info("Quiet hours - pausing updates")
+                time.sleep(SLEEP_DURATION)
             else:
-                sleeping = wake_up(sleeping)
-                if updateCountdown == 0:
-                    display_message(get_realtime_display())
-                time.sleep(1)
-                updateCountdown -= 1
+                display_message(get_realtime_display())
+                time.sleep(UPDATE_INTERVAL)
         except KeyboardInterrupt:
             logger.info("Shutting down Vestaboard display service")
             break
