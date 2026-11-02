@@ -87,6 +87,8 @@ for i in $(seq 1 254); do (nc -z -G 1 192.168.68.$i 22 2>/dev/null && echo 192.1
 
 If the Pi doesn't answer at all, it has probably hung. Power-cycle it; cron restarts both services within a minute of boot.
 
+The hardware watchdog should make that rare: `/etc/systemd/system.conf.d/watchdog.conf` sets `RuntimeWatchdogSec=15`, so the Pi reboots itself if the kernel stops responding. (It was added after the Pi froze for 17 days in October 2026.) Check it with `systemctl show -p RuntimeWatchdogUSec`.
+
 ### How it runs
 
 There is no systemd service. The `admin` crontab runs each project's monitor script every minute, and the script starts the Python process if it isn't running:
